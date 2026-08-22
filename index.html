@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Analizador de Pendientes con Google Maps</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -16,15 +16,6 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
     <style>
-        /* Evita comportamientos extraños de zoom/scroll en iOS Safari */
-        canvas {
-            touch-action: none;
-            -webkit-user-select: none;
-            user-select: none;
-        }
-        #map {
-            touch-action: pan-x pan-y;
-        }
         .leaflet-tooltip.custom-dark-tooltip {
             background-color: #1e293b;
             color: #f1f5f9;
@@ -33,6 +24,12 @@
             box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
             padding: 0.75rem;
             font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        .leaflet-tooltip-top.custom-dark-tooltip::before,
+        .leaflet-tooltip-bottom.custom-dark-tooltip::before,
+        .leaflet-tooltip-left.custom-dark-tooltip::before,
+        .leaflet-tooltip-right.custom-dark-tooltip::before {
+            border-top-color: #1e293b;
         }
         .km-marker-label {
             background: #1e293b;
@@ -48,14 +45,14 @@
     </style>
 </head>
 <body class="bg-slate-900 text-slate-100 font-sans" oncontextmenu="return false;">
-    <div class="max-w-7xl mx-auto p-4 sm:p-6">
+    <div class="max-w-7xl mx-auto p-6">
         <header class="mb-6 text-center">
-            <h1 class="text-2xl sm:text-3xl font-bold mb-2">Analizador de Desnivel con Google Maps</h1>
-            <p class="text-slate-400 text-sm sm:text-base">Desliza el dedo o el ratón para explorar el punto negro. <b>Doble toque / doble clic</b> para fijar un punto, usa el botón superior para soltarlo.</p>
+            <h1 class="text-3xl font-bold mb-2">Analizador de Desnivel con Google Maps</h1>
+            <p class="text-slate-400">Pasa el ratón para explorar (verás el punto negro). <b>Doble clic</b> para fijar un punto, usa el botón superior o clic derecho para soltarlo.</p>
         </header>
 
         <!-- Selector de archivos y controles adicionales -->
-        <div class="bg-slate-800 p-4 sm:p-6 rounded-xl shadow-lg border border-slate-700 mb-6 text-center max-w-2xl mx-auto flex flex-col sm:flex-row items-center justify-center gap-4">
+        <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700 mb-6 text-center max-w-2xl mx-auto flex flex-col sm:flex-row items-center justify-center gap-4">
             <input type="file" id="gpxFile" accept=".gpx" class="block w-full text-sm text-slate-400
                 file:mr-4 file:py-2 file:px-4
                 file:rounded-full file:border-0
@@ -88,12 +85,13 @@
             </div>
         </div>
 
-        <!-- Panel de Estadísticas del Tramo Seleccionado -->
+        <!-- Panel de Estadísticas del Tramo Seleccionado (Oculto por defecto) -->
         <div id="zoneStatsPanel" class="bg-slate-800/90 border border-indigo-500/50 p-4 rounded-xl shadow-xl mb-6 hidden backdrop-blur">
             <div class="flex justify-between items-center mb-3">
                 <h3 class="text-indigo-400 font-bold text-base flex items-center gap-2">
                     <span>📊 Estadísticas del Tramo Seleccionado</span>
                 </h3>
+                <span class="text-xs text-slate-400">Haz clic en la pendiente máxima para localizarla en el mapa y gráfica</span>
             </div>
             <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 text-center">
                 <div class="bg-slate-900/60 p-3 rounded-lg border border-slate-700">
@@ -124,32 +122,35 @@
             </div>
         </div>
 
-        <!-- Panel Principal -->
+        <!-- Panel Principal (Leyenda, Contenedor Mapa + Gráfica) -->
         <div id="dashboard" class="hidden">
-            <div class="bg-slate-800 p-4 rounded-xl shadow-lg border border-slate-700 mb-6 flex flex-wrap gap-4 justify-center items-center text-sm">
-                <span class="font-bold text-slate-400 uppercase tracking-wide text-xs">Leyenda:</span>
-                <div class="flex items-center"><span class="w-3 h-3 rounded-full mr-1.5" style="background-color: #3b82f6;"></span> Desc.</div>
-                <div class="flex items-center"><span class="w-3 h-3 rounded-full mr-1.5" style="background-color: #10b981;"></span> Llano</div>
-                <div class="flex items-center"><span class="w-3 h-3 rounded-full mr-1.5" style="background-color: #eab308;"></span> Mod.</div>
-                <div class="flex items-center"><span class="w-3 h-3 rounded-full mr-1.5" style="background-color: #f97316;"></span> Duro</div>
-                <div class="flex items-center"><span class="w-3 h-3 rounded-full mr-1.5" style="background-color: #ef4444;"></span> Extremo</div>
+            
+            <!-- Leyenda de colores -->
+            <div class="bg-slate-800 p-4 rounded-xl shadow-lg border border-slate-700 mb-6 flex flex-wrap gap-6 justify-center items-center text-sm">
+                <span class="font-bold text-slate-400 uppercase tracking-wide text-xs">Leyenda de dureza:</span>
+                <div class="flex items-center"><span class="w-4 h-4 rounded-full mr-2" style="background-color: #3b82f6;"></span> Descenso (&lt; 0%)</div>
+                <div class="flex items-center"><span class="w-4 h-4 rounded-full mr-2" style="background-color: #10b981;"></span> Llano (0 - 3%)</div>
+                <div class="flex items-center"><span class="w-4 h-4 rounded-full mr-2" style="background-color: #eab308;"></span> Moderado (3 - 6%)</div>
+                <div class="flex items-center"><span class="w-4 h-4 rounded-full mr-2" style="background-color: #f97316;"></span> Duro (6 - 10%)</div>
+                <div class="flex items-center"><span class="w-4 h-4 rounded-full mr-2" style="background-color: #ef4444;"></span> Extremo (&gt; 10%)</div>
             </div>
 
+            <!-- Contenedor principal de mapa y gráfica -->
             <div id="mainContainer" class="grid grid-cols-1 lg:grid-cols-2 gap-6 transition-all duration-300">
                 <!-- Mapa interactivo -->
-                <div id="mapCard" class="bg-slate-800 p-4 rounded-xl shadow-lg border border-slate-700 h-[400px] sm:h-[450px] relative z-10 transition-all duration-300">
+                <div id="mapCard" class="bg-slate-800 p-4 rounded-xl shadow-lg border border-slate-700 h-[450px] relative z-10 transition-all duration-300">
                     <div id="map" class="w-full h-full rounded-lg"></div>
                 </div>
                 <!-- Gráfica -->
-                <div id="chartWrapper" class="bg-slate-800 p-4 pb-8 rounded-xl shadow-lg border border-slate-700 h-[400px] sm:h-[450px] relative transition-all duration-300">
+                <div id="chartWrapper" class="bg-slate-800 p-4 pb-8 rounded-xl shadow-lg border border-slate-700 h-[450px] relative transition-all duration-300">
                     <div class="absolute top-2 right-2 z-20 flex gap-2">
-                        <button id="unpinBtn" onclick="unpinPoint()" class="hidden bg-amber-600 hover:bg-amber-500 text-white px-2.5 py-1 rounded text-xs sm:text-sm transition border border-amber-500 shadow font-semibold">
-                            ✖ Quitar Fijo
+                        <button id="unpinBtn" onclick="unpinPoint()" class="hidden bg-amber-600 hover:bg-amber-500 text-white px-3 py-1 rounded text-sm transition border border-amber-500 shadow font-semibold">
+                            ✖ Quitar Punto Fijo
                         </button>
-                        <button id="resetZoomBtn" onclick="resetChartZoom()" class="hidden bg-slate-700 hover:bg-slate-600 text-white px-2.5 py-1 rounded text-xs sm:text-sm transition border border-slate-600 shadow">
-                            🔄 Reset
+                        <button id="resetZoomBtn" onclick="resetChartZoom()" class="hidden bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded text-sm transition border border-slate-600 shadow">
+                            🔄 Restablecer Zoom
                         </button>
-                        <button id="expandBtn" onclick="toggleExpandLayout()" class="bg-slate-700 hover:bg-slate-600 text-white px-2.5 py-1 rounded text-xs sm:text-sm transition border border-slate-600 shadow">
+                        <button id="expandBtn" onclick="toggleExpandLayout()" class="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded text-sm transition border border-slate-600 shadow">
                             ⛶ Ampliar
                         </button>
                     </div>
@@ -193,7 +194,7 @@
             const isExpanded = container.classList.contains('fixed');
 
             if (isExpanded) {
-                container.classList.remove('fixed', 'inset-2', 'sm:inset-4', 'z-50', 'bg-slate-900', 'p-4', 'overflow-y-auto', 'grid-cols-1');
+                container.classList.remove('fixed', 'inset-4', 'z-50', 'bg-slate-900', 'p-6', 'overflow-y-auto', 'grid-cols-1');
                 container.classList.add('grid-cols-1', 'lg:grid-cols-2');
                 mapCard.classList.remove('h-[calc(50vh-2rem)]');
                 mapCard.classList.add('h-[450px]');
@@ -202,7 +203,7 @@
                 btn.innerHTML = '⛶ Ampliar';
             } else {
                 container.classList.remove('lg:grid-cols-2');
-                container.classList.add('fixed', 'inset-2', 'sm:inset-4', 'z-50', 'bg-slate-900', 'p-4', 'overflow-y-auto', 'grid-cols-1');
+                container.classList.add('fixed', 'inset-4', 'z-50', 'bg-slate-900', 'p-6', 'overflow-y-auto', 'grid-cols-1');
                 mapCard.classList.remove('h-[450px]');
                 mapCard.classList.add('h-[calc(50vh-2rem)]');
                 chartWrapper.classList.remove('h-[450px]');
@@ -227,12 +228,34 @@
 
         function initMap() {
             if (map) return;
-            map = L.map('map', { doubleClickZoom: false, tap: true }).setView([0, 0], 13);
+            map = L.map('map', { doubleClickZoom: false }).setView([0, 0], 13);
 
-            const googleTerrain = L.tileLayer('https://{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', {
+            const googleRoadmap = L.tileLayer('https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
                 maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: '© Google Maps'
             });
+
+            const googleTerrain = L.tileLayer('https://{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', {
+                maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: '© Google Maps - Relieve'
+            });
+
+            const googleSatellite = L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+                maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: '© Google Maps - Satélite'
+            });
+
+            const googleHybrid = L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+                maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: '© Google Maps - Híbrido'
+            });
+
             googleTerrain.addTo(map);
+
+            const baseMaps = {
+                "Google Relieve": googleTerrain,
+                "Google Híbrido (Satelite + Calles)": googleHybrid,
+                "Google Calles": googleRoadmap,
+                "Google Satélite": googleSatellite
+            };
+
+            L.control.layers(baseMaps).addTo(map);
         }
 
         document.getElementById('gpxFile').addEventListener('change', function(e) {
@@ -373,7 +396,7 @@
                 marker.setLatLng([p.lat, p.lon]);
                 let activeIsPinned = forcedPin || isPinned;
                 let tooltipContent = `
-                    <div class="text-xs sm:text-sm">
+                    <div class="text-sm">
                         <div><span class="text-slate-400">Km:</span> ${p.dist}</div>
                         <div><span class="text-slate-400">Altitud:</span> ${p.ele} m</div>
                         <div><span class="text-slate-400">Pendiente:</span> <b style="color: ${getSlopeColor(p.slope)}">${p.slope}%</b></div>
@@ -456,23 +479,24 @@
                 kmMarkersLayer.addTo(map);
             }
 
-            hitLayer = L.polyline(latlngs, { color: 'transparent', weight: 25 }).addTo(routeLayer);
+            hitLayer = L.polyline(latlngs, { color: 'transparent', weight: 20 }).addTo(routeLayer);
             map.fitBounds(routeLayer.getBounds());
 
-            // Punto negro de seguimiento
+            // Punto negro para la duplicación/seguimiento del ratón
             marker = L.circleMarker([0, 0], {
-                radius: 7, color: '#000000', fillColor: '#000000', fillOpacity: 1, weight: 2
+                radius: 6, color: '#000000', fillColor: '#000000', fillOpacity: 1, weight: 2
             }).addTo(map);
             marker.setLatLng(latlngs[0]);
 
-            function handleMapTouchOrMove(latlng) {
-                if (isUpdatingFromSource) return;
+            hitLayer.on('mousemove', function(e) {
+                if (isUpdatingFromSource) return; 
+
                 let minDistance = Infinity;
                 let closestIndex = -1;
 
                 for (let i = 0; i < globalProcessedData.length; i++) {
                     let p = globalProcessedData[i];
-                    let dist = map.distance(latlng, [p.lat, p.lon]);
+                    let dist = map.distance(e.latlng, [p.lat, p.lon]);
                     if (dist < minDistance) {
                         minDistance = dist;
                         closestIndex = i;
@@ -484,10 +508,20 @@
                 } else {
                     updatePointer(closestIndex, false);
                 }
-            }
+            });
 
-            hitLayer.on('mousemove', function(e) { handleMapTouchOrMove(e.latlng); });
-            hitLayer.on('click', function(e) { handleMapTouchOrMove(e.latlng); });
+            hitLayer.on('mouseout', function() {
+                if (isPinned) {
+                    updatePointer(pinnedIndex, true);
+                } else if (!isUpdatingFromSource) {
+                    if (marker) marker.closeTooltip();
+                    if (myChart) {
+                        myChart.setActiveElements([]);
+                        myChart.tooltip.setActiveElements([], { x: 0, y: 0 });
+                        myChart.update('none');
+                    }
+                }
+            });
 
             hitLayer.on('dblclick', function(e) {
                 let minDistance = Infinity;
@@ -509,6 +543,10 @@
                     document.getElementById('unpinBtn').classList.remove('hidden');
                     updatePointer(closestIndex, true);
                 }
+            });
+
+            hitLayer.on('contextmenu', function(e) {
+                unpinPoint();
             });
         }
 
@@ -537,7 +575,7 @@
                             tension: 0.3, 
                             yAxisID: 'y',
                             pointRadius: 0,
-                            pointHoverRadius: 7,
+                            pointHoverRadius: 6,
                             pointHoverBackgroundColor: '#000000',
                             pointHoverBorderColor: '#ffffff',
                             pointHoverBorderWidth: 2,
@@ -548,7 +586,7 @@
                             data: data.map(d => d.ele), 
                             borderWidth: 3, 
                             pointRadius: 0, 
-                            pointHoverRadius: 7,
+                            pointHoverRadius: 6,
                             pointHoverBackgroundColor: '#000000',
                             pointHoverBorderColor: '#ffffff',
                             pointHoverBorderWidth: 2,
@@ -568,10 +606,17 @@
                         } else if (elements && elements.length > 0) {
                             let hoveredIndex = elements[0].index;
                             updatePointer(hoveredIndex, false);
+                        } else {
+                            if (marker) marker.closeTooltip();
+                            if (myChart) {
+                                myChart.setActiveElements([]);
+                                myChart.tooltip.setActiveElements([], { x: 0, y: 0 });
+                                myChart.update('none');
+                            }
                         }
                     },
                     scales: {
-                        x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8', maxTicksLimit: 8 } },
+                        x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8', maxTicksLimit: 10 } },
                         y: { type: 'linear', display: true, position: 'left', title: { display: true, text: 'Pendiente (%)', color: '#94a3b8' }, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } },
                         y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Altitud (m)', color: '#94a3b8' }, grid: { drawOnChartArea: false }, ticks: { color: '#94a3b8' } }
                     },
@@ -663,7 +708,6 @@
 
             const chartCanvas = document.getElementById('slopeChart');
 
-            // Soporte para doble toque / clic en la gráfica adaptado a iOS
             chartCanvas.addEventListener('dblclick', function(event) {
                 const points = myChart.getElementsAtEventForMode(event, 'index', { intersect: false }, true);
                 if (points.length > 0) {
@@ -677,6 +721,11 @@
                         updatePointer(clickedIndex, true);
                     }
                 }
+            });
+
+            chartCanvas.addEventListener('contextmenu', function(event) {
+                event.preventDefault(); 
+                unpinPoint();
             });
         }
     </script>
