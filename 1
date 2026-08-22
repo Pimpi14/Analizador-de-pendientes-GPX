@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analizador de Pendientes con Google Maps</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js Zoom Plugin -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <style>
+        .leaflet-tooltip.custom-dark-tooltip {
+            background-color: #1e293b;
+            color: #f1f5f9;
+            border: 1px solid #334155;
+            border-radius: 0.5rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+            padding: 0.75rem;
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        .leaflet-tooltip-top.custom-dark-tooltip::before,
+        .leaflet-tooltip-bottom.custom-dark-tooltip::before,
+        .leaflet-tooltip-left.custom-dark-tooltip::before,
+        .leaflet-tooltip-right.custom-dark-tooltip::before {
+            border-top-color: #1e293b;
+        }
+        .km-marker-label {
+            background: #1e293b;
+            color: #f8fafc;
+            border: 2px solid #6366f1;
+            border-radius: 50%;
+            font-weight: bold;
+            font-size: 10px;
+            text-align: center;
+            line-height: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans" oncontextmenu="return false;">
+    <div class="max-w-7xl mx-auto p-6">
+        <header class="mb-6 text-center">
+            <h1 class="text-3xl font-bold mb-2">Analizador de Desnivel con Google Maps</h1>
+            <p class="text-slate-400">Pasa el ratón para explorar (verás el punto negro). <b>Doble clic</b> para fijar un punto, usa el botón superior o clic derecho para soltarlo.</p>
+        </header>
+
+        <!-- Selector de archivos y controles adicionales -->
+        <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700 mb-6 text-center max-w-2xl mx-auto flex flex-col sm:flex-row items-center justify-center gap-4">
+            <input type="file" id="gpxFile" accept=".gpx" class="block w-full text-sm text-slate-400
+                file:mr-4 file:py-2 file:px-4
+                file:rounded-full file:border-0
+                file:text-sm file:font-semibold
+                file:bg-indigo-600 file:text-white
+                hover:file:bg-indigo-500 cursor-pointer">
+            <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer whitespace-nowrap select-none">
+                <input type="checkbox" id="toggleKmMarkers" checked onchange="toggleKmMarkersVisibility()" class="w-4 h-4 text-indigo-600 bg-slate-900 border-slate-700 rounded focus:ring-indigo-500">
+                Mostrar km (1 en 1)
+            </label>
+        </div>
+
+        <!-- Resultados generales de la ruta -->
+        <div id="stats" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 hidden">
+            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700 text-center">
+                <span class="block text-slate-400 text-sm">Distancia Total</span>
+                <span id="statDist" class="text-xl font-bold text-slate-100">0 km</span>
+            </div>
+            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700 text-center">
+                <span class="block text-slate-400 text-sm">Desnivel Positivo</span>
+                <span id="statAscent" class="text-xl font-bold text-slate-100">0 m</span>
+            </div>
+            <div class="bg-slate-800 p-4 rounded-lg border border-slate-700 text-center">
+                <span class="block text-slate-400 text-sm">Desnivel Negativo</span>
+                <span id="statDescent" class="text-xl font-bold text-slate-100">0 m</span>
+            </div>
+            <div id="maxSlopeCard" onclick="focusMaxSlope()" class="bg-slate-800 p-4 rounded-lg border border-slate-700 text-center cursor-pointer hover:bg-slate-700 hover:border-indigo-500 transition shadow">
+                <span class="block text-slate-400 text-sm">Pendiente Máxima 🔍</span>
+                <span id="statMaxSlope" class="text-xl font-bold">0%</span>
+            </div>
+        </div>
+
+        <!-- Panel de Estadísticas del Tramo Seleccionado (Oculto por defecto) -->
+        <div id="zoneStatsPanel" class="bg-slate-800/90 border border-indigo-500/50 p-4 rounded-xl shadow-xl mb-6 hidden backdrop-blur">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="text-indigo-400 font-bold text-base flex items-center gap-2">
+                    <span>📊 Estadísticas del Tramo Seleccionado</span>
+                </h3>
+                <span class="text-xs text-slate-400">Haz clic en la pendiente máxima para localizarla en el mapa y gráfica</span>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 text-center">
+                <div class="bg-slate-900/60 p-3 rounded-lg border border-slate-700">
+                    <span class="block text-slate-400 text-xs">Longitud Zona</span>
+                    <span id="zoneDist" class="text-lg font-bold text-slate-100">0 km</span>
+                </div>
+                <div class="bg-slate-900/60 p-3 rounded-lg border border-slate-700">
+                    <span class="block text-slate-400 text-xs">Pendiente Media</span>
+                    <span id="zoneAvgSlope" class="text-lg font-bold text-slate-100">0%</span>
+                </div>
+                <div class="bg-slate-900/60 p-3 rounded-lg border border-slate-700 cursor-pointer hover:bg-slate-700 transition" onclick="focusZoneMaxSlope()">
+                    <span class="block text-slate-400 text-xs">Pendiente Máx 🔍</span>
+                    <span id="zoneMaxSlope" class="text-lg font-bold">0%</span>
+                </div>
+                <div class="bg-slate-900/60 p-3 rounded-lg border border-slate-700">
+                    <span class="block text-slate-400 text-xs">Ascenso Acum.</span>
+                    <span id="zoneAscent" class="text-lg font-bold text-emerald-400">0 m</span>
+                </div>
+                <div class="bg-slate-900/60 p-3 rounded-lg border border-slate-700">
+                    <span class="block text-slate-400 text-xs">Descenso Acum.</span>
+                    <span id="zoneDescent" class="text-lg font-bold text-blue-400">0 m</span>
+                </div>
+                <div class="bg-slate-900/60 p-3 rounded-lg border border-slate-700 flex items-center justify-center">
+                    <button onclick="resetChartZoom()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1 rounded text-xs font-semibold transition shadow">
+                        Ver Ruta Completa
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Panel Principal (Leyenda, Contenedor Mapa + Gráfica) -->
+        <div id="dashboard" class="hidden">
+            
+            <!-- Leyenda de colores -->
+            <div class="bg-slate-800 p-4 rounded-xl shadow-lg border border-slate-700 mb-6 flex flex-wrap gap-6 justify-center items-center text-sm">
+                <span class="font-bold text-slate-400 uppercase tracking-wide text-xs">Leyenda de dureza:</span>
+                <div class="flex items-center"><span class="w-4 h-4 rounded-full mr-2" style="background-color: #3b82f6;"></span> Descenso (&lt; 0%)</div>
+                <div class="flex items-center"><span class="w-4 h-4 rounded-full mr-2" style="background-color: #10b981;"></span> Llano (0 - 3%)</div>
+                <div class="flex items-center"><span class="w-4 h-4 rounded-full mr-2" style="background-color: #eab308;"></span> Moderado (3 - 6%)</div>
+                <div class="flex items-center"><span class="w-4 h-4 rounded-full mr-2" style="background-color: #f97316;"></span> Duro (6 - 10%)</div>
+                <div class="flex items-center"><span class="w-4 h-4 rounded-full mr-2" style="background-color: #ef4444;"></span> Extremo (&gt; 10%)</div>
+            </div>
+
+            <!-- Contenedor principal de mapa y gráfica -->
+            <div id="mainContainer" class="grid grid-cols-1 lg:grid-cols-2 gap-6 transition-all duration-300">
+                <!-- Mapa interactivo -->
+                <div id="mapCard" class="bg-slate-800 p-4 rounded-xl shadow-lg border border-slate-700 h-[450px] relative z-10 transition-all duration-300">
+                    <div id="map" class="w-full h-full rounded-lg"></div>
+                </div>
+                <!-- Gráfica -->
+                <div id="chartWrapper" class="bg-slate-800 p-4 pb-8 rounded-xl shadow-lg border border-slate-700 h-[450px] relative transition-all duration-300">
+                    <div class="absolute top-2 right-2 z-20 flex gap-2">
+                        <button id="unpinBtn" onclick="unpinPoint()" class="hidden bg-amber-600 hover:bg-amber-500 text-white px-3 py-1 rounded text-sm transition border border-amber-500 shadow font-semibold">
+                            ✖ Quitar Punto Fijo
+                        </button>
+                        <button id="resetZoomBtn" onclick="resetChartZoom()" class="hidden bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded text-sm transition border border-slate-600 shadow">
+                            🔄 Restablecer Zoom
+                        </button>
+                        <button id="expandBtn" onclick="toggleExpandLayout()" class="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded text-sm transition border border-slate-600 shadow">
+                            ⛶ Ampliar
+                        </button>
+                    </div>
+                    <div class="w-full h-full mt-4">
+                        <canvas id="slopeChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let map = null;
+        let routeLayer = null;
+        let kmMarkersLayer = null;
+        let marker = null;
+        let myChart = null;
+        let globalProcessedData = [];
+        let globalLatlngs = [];
+        let rawProcessedList = [];
+        let isPinned = false; 
+        let pinnedIndex = -1;
+        let hitLayer = null;
+        let maxSlopeIndex = 0;
+        let zoneMaxSlopeIndex = 0;
+        let isUpdatingFromSource = false;
+
+        function getSlopeColor(slope) {
+            if (slope < 0) return '#3b82f6';
+            if (slope < 3) return '#10b981';
+            if (slope < 6) return '#eab308';
+            if (slope < 10) return '#f97316';
+            return '#ef4444';
+        }
+
+        function toggleExpandLayout() {
+            const container = document.getElementById('mainContainer');
+            const mapCard = document.getElementById('mapCard');
+            const chartWrapper = document.getElementById('chartWrapper');
+            const btn = document.getElementById('expandBtn');
+            const isExpanded = container.classList.contains('fixed');
+
+            if (isExpanded) {
+                container.classList.remove('fixed', 'inset-4', 'z-50', 'bg-slate-900', 'p-6', 'overflow-y-auto', 'grid-cols-1');
+                container.classList.add('grid-cols-1', 'lg:grid-cols-2');
+                mapCard.classList.remove('h-[calc(50vh-2rem)]');
+                mapCard.classList.add('h-[450px]');
+                chartWrapper.classList.remove('h-[calc(50vh-2rem)]');
+                chartWrapper.classList.add('h-[450px]');
+                btn.innerHTML = '⛶ Ampliar';
+            } else {
+                container.classList.remove('lg:grid-cols-2');
+                container.classList.add('fixed', 'inset-4', 'z-50', 'bg-slate-900', 'p-6', 'overflow-y-auto', 'grid-cols-1');
+                mapCard.classList.remove('h-[450px]');
+                mapCard.classList.add('h-[calc(50vh-2rem)]');
+                chartWrapper.classList.remove('h-[450px]');
+                chartWrapper.classList.add('h-[calc(50vh-2rem)]');
+                btn.innerHTML = '✖ Reducir';
+            }
+
+            if (map) setTimeout(() => { map.invalidateSize(); }, 150);
+            if (myChart) setTimeout(() => { myChart.resize(); }, 150);
+        }
+
+        function resetChartZoom() {
+            if (myChart) {
+                myChart.resetZoom();
+                document.getElementById('resetZoomBtn').classList.add('hidden');
+                document.getElementById('zoneStatsPanel').classList.add('hidden');
+                if (map && globalLatlngs.length > 0) {
+                    map.fitBounds(routeLayer.getBounds());
+                }
+            }
+        }
+
+        function initMap() {
+            if (map) return;
+            map = L.map('map', { doubleClickZoom: false }).setView([0, 0], 13);
+
+            const googleRoadmap = L.tileLayer('https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+                maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: '© Google Maps'
+            });
+
+            const googleTerrain = L.tileLayer('https://{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', {
+                maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: '© Google Maps - Relieve'
+            });
+
+            const googleSatellite = L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+                maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: '© Google Maps - Satélite'
+            });
+
+            const googleHybrid = L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+                maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: '© Google Maps - Híbrido'
+            });
+
+            googleTerrain.addTo(map);
+
+            const baseMaps = {
+                "Google Relieve": googleTerrain,
+                "Google Híbrido (Satelite + Calles)": googleHybrid,
+                "Google Calles": googleRoadmap,
+                "Google Satélite": googleSatellite
+            };
+
+            L.control.layers(baseMaps).addTo(map);
+        }
+
+        document.getElementById('gpxFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(event.target.result, "text/xml");
+                processGPX(xmlDoc);
+            };
+            reader.readAsText(file);
+        });
+
+        function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
+            const R = 6371000;
+            const dLat = (lat2 - lat1) * (Math.PI/180);
+            const dLon = (lon2 - lon1) * (Math.PI/180);
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * (Math.PI/180)) * Math.cos(lat2 * (Math.PI/180)) * 
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+        }
+
+        function processGPX(xml) {
+            const trackpoints = xml.getElementsByTagName('trkpt');
+            if (trackpoints.length === 0) return alert("El archivo GPX no contiene trackpoints.");
+
+            let rawData = [];
+            let totalDistance = 0, totalAscent = 0, totalDescent = 0;
+            globalLatlngs = [];
+
+            for (let i = 0; i < trackpoints.length; i++) {
+                const lat = parseFloat(trackpoints[i].getAttribute('lat'));
+                const lon = parseFloat(trackpoints[i].getAttribute('lon'));
+                const eleNodes = trackpoints[i].getElementsByTagName('ele');
+                const ele = eleNodes.length > 0 ? parseFloat(eleNodes[0].textContent) : 0;
+                rawData.push({ lat, lon, ele });
+                globalLatlngs.push([lat, lon]);
+            }
+
+            rawProcessedList = [];
+            for (let i = 0; i < rawData.length; i++) {
+                if (i === 0) {
+                    rawProcessedList.push({ dist: 0, ele: rawData[i].ele, eleDelta: 0, distDelta: 0, lat: rawData[i].lat, lon: rawData[i].lon });
+                } else {
+                    const distDelta = getDistanceFromLatLonInMeters(rawData[i-1].lat, rawData[i-1].lon, rawData[i].lat, rawData[i].lon);
+                    totalDistance += distDelta;
+                    const eleDelta = rawData[i].ele - rawData[i-1].ele;
+                    if (eleDelta > 0) totalAscent += eleDelta; else totalDescent += Math.abs(eleDelta);
+
+                    rawProcessedList.push({ dist: totalDistance, ele: rawData[i].ele, eleDelta: eleDelta, distDelta: distDelta, lat: rawData[i].lat, lon: rawData[i].lon });
+                }
+            }
+
+            const windowSize = 5;
+            globalProcessedData = [];
+            let maxSlope = -Infinity;
+            maxSlopeIndex = 0;
+
+            for (let i = 0; i < rawProcessedList.length; i++) {
+                if (i < windowSize) {
+                    globalProcessedData.push({ dist: (rawProcessedList[i].dist / 1000).toFixed(2), slope: 0, ele: Math.round(rawProcessedList[i].ele), lat: rawProcessedList[i].lat, lon: rawProcessedList[i].lon, index: i });
+                    continue;
+                }
+
+                let sumDist = 0, sumEleDelta = 0;
+                for (let j = i - windowSize; j <= i; j++) {
+                    sumDist += rawProcessedList[j].distDelta;
+                    sumEleDelta += rawProcessedList[j].eleDelta;
+                }
+
+                let slope = sumDist > 0 ? (sumEleDelta / sumDist) * 100 : 0;
+                if (slope > maxSlope) {
+                    maxSlope = slope;
+                    maxSlopeIndex = i;
+                }
+
+                globalProcessedData.push({ dist: (rawProcessedList[i].dist / 1000).toFixed(2), slope: parseFloat(slope.toFixed(1)), ele: Math.round(rawProcessedList[i].ele), lat: rawProcessedList[i].lat, lon: rawProcessedList[i].lon, index: i });
+            }
+
+            document.getElementById('statDist').innerText = (totalDistance / 1000).toFixed(2) + ' km';
+            document.getElementById('statAscent').innerText = Math.round(totalAscent) + ' m';
+            document.getElementById('statDescent').innerText = Math.round(totalDescent) + ' m';
+            
+            const maxSlopeEl = document.getElementById('statMaxSlope');
+            maxSlopeEl.innerText = maxSlope.toFixed(1) + '%';
+            maxSlopeEl.style.color = getSlopeColor(maxSlope);
+            
+            document.getElementById('stats').classList.remove('hidden');
+            document.getElementById('dashboard').classList.remove('hidden');
+            document.getElementById('zoneStatsPanel').classList.add('hidden');
+
+            isPinned = false; 
+            pinnedIndex = -1;
+            document.getElementById('unpinBtn').classList.add('hidden');
+            renderMap(globalLatlngs);
+            renderChart(globalProcessedData);
+        }
+
+        function toggleKmMarkersVisibility() {
+            if (!map) return;
+            const show = document.getElementById('toggleKmMarkers').checked;
+            if (show) {
+                if (kmMarkersLayer) kmMarkersLayer.addTo(map);
+            } else {
+                if (kmMarkersLayer) map.removeLayer(kmMarkersLayer);
+            }
+        }
+
+        function focusMaxSlope() {
+            if (globalProcessedData.length === 0) return;
+            isPinned = true;
+            pinnedIndex = maxSlopeIndex;
+            document.getElementById('unpinBtn').classList.remove('hidden');
+            updatePointer(maxSlopeIndex, true);
+            let p = globalProcessedData[maxSlopeIndex];
+            if (map) map.setView([p.lat, p.lon], 16);
+        }
+
+        function focusZoneMaxSlope() {
+            if (globalProcessedData.length === 0) return;
+            isPinned = true;
+            pinnedIndex = zoneMaxSlopeIndex;
+            document.getElementById('unpinBtn').classList.remove('hidden');
+            updatePointer(zoneMaxSlopeIndex, true);
+            let p = globalProcessedData[zoneMaxSlopeIndex];
+            if (map) map.setView([p.lat, p.lon], 16);
+        }
+
+        function updatePointer(closestIndex, forcedPin = false) {
+            if (closestIndex === -1 || isUpdatingFromSource) return;
+            isUpdatingFromSource = true;
+
+            let p = globalProcessedData[closestIndex];
+            if (marker) {
+                marker.setLatLng([p.lat, p.lon]);
+                let activeIsPinned = forcedPin || isPinned;
+                let tooltipContent = `
+                    <div class="text-sm">
+                        <div><span class="text-slate-400">Km:</span> ${p.dist}</div>
+                        <div><span class="text-slate-400">Altitud:</span> ${p.ele} m</div>
+                        <div><span class="text-slate-400">Pendiente:</span> <b style="color: ${getSlopeColor(p.slope)}">${p.slope}%</b></div>
+                        ${activeIsPinned ? '<div class="text-xs text-amber-400 mt-1 font-semibold">📍 Punto fijado</div>' : '<div class="text-xs text-slate-400 mt-1">Explorando...</div>'}
+                    </div>
+                `;
+                let tp = marker.getTooltip();
+                if (!tp) {
+                    marker.bindTooltip(tooltipContent, { className: 'custom-dark-tooltip', direction: 'top', offset: [0, -10] }).openTooltip();
+                } else {
+                    marker.setTooltipContent(tooltipContent);
+                    marker.openTooltip();
+                }
+            }
+
+            if (myChart) {
+                const activeElements = [
+                    { datasetIndex: 0, index: closestIndex },
+                    { datasetIndex: 1, index: closestIndex }
+                ];
+                myChart.setActiveElements(activeElements);
+                myChart.tooltip.setActiveElements(activeElements, { x: 0, y: 0 });
+                myChart.update('none');
+            }
+
+            isUpdatingFromSource = false;
+        }
+
+        function unpinPoint() {
+            isPinned = false;
+            pinnedIndex = -1;
+            document.getElementById('unpinBtn').classList.add('hidden');
+            if (marker) marker.closeTooltip();
+            if (myChart) {
+                myChart.setActiveElements([]);
+                myChart.tooltip.setActiveElements([], { x: 0, y: 0 });
+                myChart.update('none');
+            }
+        }
+
+        function renderMap(latlngs) {
+            initMap();
+            if (routeLayer) map.removeLayer(routeLayer);
+            if (kmMarkersLayer) map.removeLayer(kmMarkersLayer);
+            if (marker) map.removeLayer(marker);
+
+            routeLayer = L.featureGroup().addTo(map);
+            kmMarkersLayer = L.layerGroup();
+
+            for (let i = 1; i < globalProcessedData.length; i++) {
+                let p1 = globalProcessedData[i-1];
+                let p2 = globalProcessedData[i];
+                L.polyline([[p1.lat, p1.lon], [p2.lat, p2.lon]], {
+                    color: getSlopeColor(p2.slope),
+                    weight: 5
+                }).addTo(routeLayer);
+            }
+
+            let nextTargetKm = 1;
+            for (let i = 0; i < rawProcessedList.length; i++) {
+                let currentKm = rawProcessedList[i].dist / 1000;
+                if (currentKm >= nextTargetKm) {
+                    let pt = rawProcessedList[i];
+                    let kmIcon = L.divIcon({
+                        className: 'custom-km-icon',
+                        html: `<div class="km-marker-label">${nextTargetKm}</div>`,
+                        iconSize: [24, 24],
+                        iconAnchor: [12, 12]
+                    });
+
+                    let kmMarker = L.marker([pt.lat, pt.lon], { icon: kmIcon });
+                    kmMarker.bindTooltip(`Kilómetro ${nextTargetKm}`, { direction: 'top', offset: [0, -10] });
+                    kmMarkersLayer.addLayer(kmMarker);
+
+                    nextTargetKm++;
+                }
+            }
+
+            if (document.getElementById('toggleKmMarkers').checked) {
+                kmMarkersLayer.addTo(map);
+            }
+
+            hitLayer = L.polyline(latlngs, { color: 'transparent', weight: 20 }).addTo(routeLayer);
+            map.fitBounds(routeLayer.getBounds());
+
+            // Punto negro para la duplicación/seguimiento del ratón
+            marker = L.circleMarker([0, 0], {
+                radius: 6, color: '#000000', fillColor: '#000000', fillOpacity: 1, weight: 2
+            }).addTo(map);
+            marker.setLatLng(latlngs[0]);
+
+            hitLayer.on('mousemove', function(e) {
+                if (isUpdatingFromSource) return; 
+
+                let minDistance = Infinity;
+                let closestIndex = -1;
+
+                for (let i = 0; i < globalProcessedData.length; i++) {
+                    let p = globalProcessedData[i];
+                    let dist = map.distance(e.latlng, [p.lat, p.lon]);
+                    if (dist < minDistance) {
+                        minDistance = dist;
+                        closestIndex = i;
+                    }
+                }
+                
+                if (isPinned) {
+                    updatePointer(pinnedIndex, true);
+                } else {
+                    updatePointer(closestIndex, false);
+                }
+            });
+
+            hitLayer.on('mouseout', function() {
+                if (isPinned) {
+                    updatePointer(pinnedIndex, true);
+                } else if (!isUpdatingFromSource) {
+                    if (marker) marker.closeTooltip();
+                    if (myChart) {
+                        myChart.setActiveElements([]);
+                        myChart.tooltip.setActiveElements([], { x: 0, y: 0 });
+                        myChart.update('none');
+                    }
+                }
+            });
+
+            hitLayer.on('dblclick', function(e) {
+                let minDistance = Infinity;
+                let closestIndex = -1;
+                for (let i = 0; i < globalProcessedData.length; i++) {
+                    let p = globalProcessedData[i];
+                    let dist = map.distance(e.latlng, [p.lat, p.lon]);
+                    if (dist < minDistance) {
+                        minDistance = dist;
+                        closestIndex = i;
+                    }
+                }
+
+                if (isPinned && Math.abs(closestIndex - pinnedIndex) <= 3) {
+                    unpinPoint();
+                } else {
+                    isPinned = true;
+                    pinnedIndex = closestIndex;
+                    document.getElementById('unpinBtn').classList.remove('hidden');
+                    updatePointer(closestIndex, true);
+                }
+            });
+
+            hitLayer.on('contextmenu', function(e) {
+                unpinPoint();
+            });
+        }
+
+        function renderChart(data) {
+            const ctx = document.getElementById('slopeChart').getContext('2d');
+            if (myChart) myChart.destroy();
+
+            const segmentColorizer = (ctx) => {
+                if (ctx.p1DataIndex !== undefined && globalProcessedData[ctx.p1DataIndex]) {
+                    return getSlopeColor(globalProcessedData[ctx.p1DataIndex].slope);
+                }
+                return '#818cf8';
+            };
+
+            myChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.map(d => d.dist + ' km'),
+                    datasets: [
+                        { 
+                            label: 'Pendiente (%)', 
+                            data: data.map(d => d.slope), 
+                            borderWidth: 2, 
+                            fill: true,
+                            backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                            tension: 0.3, 
+                            yAxisID: 'y',
+                            pointRadius: 0,
+                            pointHoverRadius: 6,
+                            pointHoverBackgroundColor: '#000000',
+                            pointHoverBorderColor: '#ffffff',
+                            pointHoverBorderWidth: 2,
+                            segment: { borderColor: segmentColorizer }
+                        },
+                        { 
+                            label: 'Altitud (m)', 
+                            data: data.map(d => d.ele), 
+                            borderWidth: 3, 
+                            pointRadius: 0, 
+                            pointHoverRadius: 6,
+                            pointHoverBackgroundColor: '#000000',
+                            pointHoverBorderColor: '#ffffff',
+                            pointHoverBorderWidth: 2,
+                            yAxisID: 'y1',
+                            segment: { borderColor: segmentColorizer }
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    onHover: (event, elements) => {
+                        if (isUpdatingFromSource) return; 
+
+                        if (isPinned) {
+                            updatePointer(pinnedIndex, true);
+                        } else if (elements && elements.length > 0) {
+                            let hoveredIndex = elements[0].index;
+                            updatePointer(hoveredIndex, false);
+                        } else {
+                            if (marker) marker.closeTooltip();
+                            if (myChart) {
+                                myChart.setActiveElements([]);
+                                myChart.tooltip.setActiveElements([], { x: 0, y: 0 });
+                                myChart.update('none');
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8', maxTicksLimit: 10 } },
+                        y: { type: 'linear', display: true, position: 'left', title: { display: true, text: 'Pendiente (%)', color: '#94a3b8' }, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } },
+                        y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Altitud (m)', color: '#94a3b8' }, grid: { drawOnChartArea: false }, ticks: { color: '#94a3b8' } }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                labelTextColor: function(context) {
+                                    if(context.dataset.label === 'Pendiente (%)') {
+                                        return getSlopeColor(context.raw);
+                                    }
+                                    return '#ffffff';
+                                }
+                            }
+                        },
+                        zoom: {
+                            pan: { enabled: false },
+                            zoom: {
+                                wheel: { enabled: false },
+                                pinch: { enabled: false },
+                                drag: { 
+                                    enabled: true,
+                                    backgroundColor: 'rgba(99, 102, 241, 0.2)'
+                                },
+                                mode: 'x',
+                                onZoomComplete: ({chart}) => {
+                                    document.getElementById('resetZoomBtn').classList.remove('hidden');
+                                    
+                                    const minIndex = Math.max(0, Math.floor(chart.scales.x.min));
+                                    const maxIndex = Math.min(globalProcessedData.length - 1, Math.ceil(chart.scales.x.max));
+                                    
+                                    if (minIndex < maxIndex) {
+                                        let zoneDistMeters = rawProcessedList[maxIndex].dist - rawProcessedList[minIndex].dist;
+                                        let zoneAscent = 0;
+                                        let zoneDescent = 0;
+                                        let zoneMaxSlope = -Infinity;
+                                        zoneMaxSlopeIndex = minIndex;
+
+                                        let sumSlope = 0;
+                                        let count = 0;
+
+                                        for (let i = minIndex; i <= maxIndex; i++) {
+                                            if (i > 0) {
+                                                let eleDelta = rawProcessedList[i].eleDelta;
+                                                if (eleDelta > 0) zoneAscent += eleDelta;
+                                                else zoneDescent += Math.abs(eleDelta);
+                                            }
+                                            let currentSlope = globalProcessedData[i].slope;
+                                            sumSlope += currentSlope;
+                                            count++;
+
+                                            if (currentSlope > zoneMaxSlope) {
+                                                zoneMaxSlope = currentSlope;
+                                                zoneMaxSlopeIndex = i;
+                                            }
+                                        }
+
+                                        let zoneAvgSlope = count > 0 ? (sumSlope / count) : 0;
+
+                                        document.getElementById('zoneDist').innerText = (zoneDistMeters / 1000).toFixed(2) + ' km';
+                                        document.getElementById('zoneAvgSlope').innerText = zoneAvgSlope.toFixed(1) + '%';
+                                        
+                                        const zoneMaxEl = document.getElementById('zoneMaxSlope');
+                                        zoneMaxEl.innerText = zoneMaxSlope.toFixed(1) + '%';
+                                        zoneMaxEl.style.color = getSlopeColor(zoneMaxSlope);
+
+                                        document.getElementById('zoneAscent').innerText = Math.round(zoneAscent) + ' m';
+                                        document.getElementById('zoneDescent').innerText = Math.round(zoneDescent) + ' m';
+
+                                        document.getElementById('zoneStatsPanel').classList.remove('hidden');
+                                    }
+
+                                    if (map) {
+                                        let bounds = [];
+                                        for (let i = minIndex; i <= maxIndex; i++) {
+                                            if (globalProcessedData[i]) {
+                                                bounds.push([globalProcessedData[i].lat, globalProcessedData[i].lon]);
+                                            }
+                                        }
+                                        if (bounds.length > 0) {
+                                            map.fitBounds(bounds, { padding: [20, 20] });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            const chartCanvas = document.getElementById('slopeChart');
+
+            chartCanvas.addEventListener('dblclick', function(event) {
+                const points = myChart.getElementsAtEventForMode(event, 'index', { intersect: false }, true);
+                if (points.length > 0) {
+                    let clickedIndex = points[0].index;
+                    if (isPinned && Math.abs(clickedIndex - pinnedIndex) <= 3) {
+                        unpinPoint();
+                    } else {
+                        isPinned = true;
+                        pinnedIndex = clickedIndex;
+                        document.getElementById('unpinBtn').classList.remove('hidden');
+                        updatePointer(clickedIndex, true);
+                    }
+                }
+            });
+
+            chartCanvas.addEventListener('contextmenu', function(event) {
+                event.preventDefault(); 
+                unpinPoint();
+            });
+        }
+    </script>
+</body>
+</html>
