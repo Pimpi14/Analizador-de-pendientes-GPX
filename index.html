@@ -211,6 +211,7 @@
     <script>
         let map = null;
         let routeLayer = null;
+        let highlightedLayer = null;
         let kmMarkersLayer = null;
         let marker = null;
         let fixedMarker = null;
@@ -390,6 +391,7 @@
             initMap();
 
             if (routeLayer) map.removeLayer(routeLayer);
+            if (highlightedLayer) map.removeLayer(highlightedLayer);
             if (kmMarkersLayer) map.removeLayer(kmMarkersLayer);
 
             routeLayer = L.polyline(globalLatlngs, { color: '#6366f1', weight: 4 }).addTo(map);
@@ -613,6 +615,11 @@
                 updateSectionStats(visiblePoints);
                 if (map) {
                     const bounds = visiblePoints.map(p => [p.lat, p.lon]);
+                    
+                    // Resaltar en el mapa el tramo visualizado/seleccionado
+                    if (highlightedLayer) map.removeLayer(highlightedLayer);
+                    highlightedLayer = L.polyline(bounds, { color: '#f97316', weight: 6, opacity: 0.9 }).addTo(map);
+
                     map.fitBounds(bounds, { padding: [20, 20] });
                 }
             }
@@ -624,6 +631,11 @@
                 document.getElementById('resetZoomBtn').classList.add('hidden');
                 document.getElementById('sectionSummary').classList.add('hidden');
                 updateSectionStats(globalProcessedData);
+                
+                if (highlightedLayer && map) {
+                    map.removeLayer(highlightedLayer);
+                    highlightedLayer = null;
+                }
                 if (map && routeLayer) map.fitBounds(routeLayer.getBounds());
             }
         }
